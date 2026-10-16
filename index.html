@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#14532d"><link rel="manifest" href="manifest.json">
+<title>GST Return Reminder</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#17211b;background:#f4f7f4}*{box-sizing:border-box}body{margin:0}header{background:#14532d;color:white;padding:18px 16px}header h1{font-size:21px;margin:0 0 5px}header p{margin:0;font-size:13px;opacity:.9}.wrap{max-width:1100px;margin:auto;padding:14px}.stats{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.stat,.panel{background:white;border:1px solid #dce5dd;border-radius:14px;padding:14px}.stat small{color:#526458}.stat strong{display:block;font-size:25px;margin-top:5px}.controls{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.btn,button{border:0;border-radius:9px;padding:10px 13px;background:#166534;color:white;font-weight:650;cursor:pointer}.btn.secondary,button.secondary{background:#e6eee7;color:#18472a}.btn.danger{background:#fee2e2;color:#991b1b}input,select{padding:10px;border:1px solid #c8d5ca;border-radius:8px;width:100%;background:white;color:#17211b}.formgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.panel h2{font-size:17px;margin:0 0 12px}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:720px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e5ebe6;font-size:13px}th{color:#526458;background:#f8faf8}.pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700}.Pending,.Overdue{background:#fee2e2;color:#991b1b}.Filed{background:#dcfce7;color:#166534}.Upcoming{background:#fef3c7;color:#92400e}.muted{color:#64756a;font-size:12px}.notice{background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:10px;font-size:13px;margin:12px 0}.hide{display:none}.fileinput{max-width:260px}.search{max-width:280px}.actions{display:flex;gap:6px}.actions button{padding:6px 8px;font-size:12px}.footer{font-size:12px;color:#607064;padding:16px 2px}@media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}.formgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:10px}.stat{padding:12px}.stat strong{font-size:22px}}@media(max-width:420px){.formgrid{grid-template-columns:1fr}.formgrid .wide{grid-column:auto}}
+</style></head>
+<body>
+<header><h1>GST Return Reminder</h1><p>Client Master · Due Dates · Pending / Filed · CSV Import/Export</p></header>
+<main class="wrap">
+<div class="notice"><b>MVP Notice:</b> This app stores data in this browser/device. Live GST portal status integration is not included yet. Mark a return as Filed only after verifying the filing. Open the app to check reminders; background notification delivery is not guaranteed in this web MVP.</div>
+<section class="stats">
+<div class="stat"><small>Total Return Records</small><strong id="total">0</strong></div>
+<div class="stat"><small>Pending / Overdue</small><strong id="pending">0</strong></div>
+<div class="stat"><small>Due in 7 Days</small><strong id="soon">0</strong></div>
+<div class="stat"><small>Filed</small><strong id="filed">0</strong></div>
+</section>
+<div class="controls">
+<button id="addToggle">+ Add Client / Return</button>
+<button class="secondary" id="exportBtn">CSV Export</button>
+<label class="btn secondary fileinput">CSV Import <input id="importFile" type="file" accept=".csv,text/csv" hidden></label>
+<button class="secondary" id="notifyBtn">Enable Notifications</button>
+</div>
+<section class="panel hide" id="formPanel">
+<h2>Client and Return Details</h2>
+<form id="recordForm">
+<div class="formgrid">
+<div><label>Client Name *</label><input required id="client" placeholder="e.g. ABC Traders"></div>
+<div><label>GSTIN</label><input id="gstin" maxlength="15" placeholder="15 अक्षर का GSTIN"></div>
+<div><label>रिटर्न</label><select id="returnType"><option>GSTR-1</option><option>GSTR-3B</option><option>CMP-08</option><option>GSTR-4</option><option>GSTR-9</option><option>Other</option></select></div>
+<div><label>Return Period *</label><input required id="period" placeholder="e.g. Sep 2026"></div>
+<div><label>Due Date *</label><input required id="dueDate" type="date"></div>
+<div><label>Status</label><select id="status"><option>Pending</option><option>Filed</option></select></div>
+<div><label>Filed Date (if applicable)</label><input id="filedDate" type="date"></div>
+<div><label>Notes</label><input id="note" placeholder="Optional"></div>
+</div><div class="controls"><button type="submit">Save Record</button><button type="button" class="secondary" id="cancelBtn">Cancel</button></div>
+<input type="hidden" id="editId"></form></section>
+<section class="panel">
+<div style="display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2>Return Tracker</h2><input class="search" id="search" placeholder="Search name / GSTIN / return"></div>
+<div class="controls" style="margin-top:0"><select id="filterStatus" style="max-width:180px"><option value="All">All Statuses</option><option>Pending</option><option>Filed</option><option>Overdue</option><option>Upcoming</option></select><select id="filterType" style="max-width:180px"><option value="All">All Returns</option><option>GSTR-1</option><option>GSTR-3B</option><option>CMP-08</option><option>GSTR-4</option><option>GSTR-9</option><option>Other</option></select></div>
+<div class="tablewrap"><table><thead><tr><th>Client / GSTIN</th><th>Return / Period</th><th>Due Date</th><th>Status</th><th>Reminder</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p class="muted" id="empty">No records yet. Add a client or import a CSV file.</p>
+</section>
+<div class="footer">Export CSV regularly to back up your data. Clearing browser data may delete records. Do not enter GST passwords or OTPs in this app.</div>
+</main>
+<script>
+const KEY='gst_return_reminder_v1'; let records=load();
+function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return []}}
+function save(){localStorage.setItem(KEY,JSON.stringify(records));render()}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function today(){let d=new Date();d.setHours(0,0,0,0);return d}
+function dateObj(s){if(!s)return null;let d=new Date(s+'T00:00:00');return isNaN(d)?null:d}
+function daysLeft(s){let d=dateObj(s);return d?Math.round((d-today())/86400000):null}
+function computed(r){if(r.status==='Filed')return 'Filed';let n=daysLeft(r.dueDate);if(n!==null&&n<0)return 'Overdue';if(n!==null&&n<=7)return 'Upcoming';return 'Pending'}
+function render(){
+ let q=document.getElementById('search').value.toLowerCase(), fs=document.getElementById('filterStatus').value, ft=document.getElementById('filterType').value;
+ document.getElementById('total').textContent=records.length;
+ document.getElementById('pending').textContent=records.filter(r=>r.status!=='Filed').length;
+ document.getElementById('soon').textContent=records.filter(r=>r.status!=='Filed'&&daysLeft(r.dueDate)>=0&&daysLeft(r.dueDate)<=7).length;
+ document.getElementById('filed').textContent=records.filter(r=>r.status==='Filed').length;
+ let list=records.filter(r=>(!q||(r.client+' '+r.gstin+' '+r.returnType+' '+r.period).toLowerCase().includes(q))&&(ft==='All'||r.returnType===ft)&&(fs==='All'||computed(r)===fs)).sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+ document.getElementById('rows').innerHTML=list.map(r=>{let st=computed(r),n=daysLeft(r.dueDate),rem=r.status==='Filed'?'Off':n<0?`${Math.abs(n)} days overdue`:n===0?'Today':n===1?'Tomorrow':`${n} days left`;return `<tr><td><b>${esc(r.client)}</b><br><span class="muted">${esc(r.gstin||'GSTIN not provided')}</span></td><td>${esc(r.returnType)}<br><span class="muted">${esc(r.period)}</span></td><td>${esc(r.dueDate||'—')}</td><td><span class="pill ${st}">${st==='Upcoming'?'Due Soon':st}</span></td><td>${rem}</td><td><div class="actions"><button class="secondary" onclick="editRec('${r.id}')">Edit</button>${r.status!=='Filed'?`<button onclick="markFiled('${r.id}')">Filed</button>`:`<button class="secondary" onclick="markPending('${r.id}')">Pending</button>`}<button class="danger" onclick="delRec('${r.id}')">Delete</button></div></td></tr>`}).join('');
+ document.getElementById('empty').classList.toggle('hide',list.length>0);
+}
+function resetForm(){document.getElementById('recordForm').reset();document.getElementById('editId').value='';document.getElementById('formPanel').classList.add('hide')}
+document.getElementById('addToggle').onclick=()=>{document.getElementById('formPanel').classList.toggle('hide');document.getElementById('client').focus()};
+document.getElementById('cancelBtn').onclick=resetForm;
+document.getElementById('recordForm').onsubmit=e=>{e.preventDefault();let id=document.getElementById('editId').value;let r={id:id||crypto.randomUUID(),client:client.value.trim(),gstin:gstin.value.trim().toUpperCase(),returnType:returnType.value,period:period.value.trim(),dueDate:dueDate.value,status:status.value,filedDate:filedDate.value,note:note.value.trim()};if(r.status==='Filed'&&!r.filedDate)r.filedDate=new Date().toISOString().slice(0,10);let i=records.findIndex(x=>x.id===id);if(i>=0)records[i]=r;else records.push(r);save();resetForm()};
+window.editRec=id=>{let r=records.find(x=>x.id===id);if(!r)return;document.getElementById('formPanel').classList.remove('hide');for(let k of ['client','gstin','returnType','period','dueDate','status','filedDate','note'])document.getElementById(k).value=r[k]||'';document.getElementById('editId').value=id;window.scrollTo({top:0,behavior:'smooth'})};
+window.markFiled=id=>{let r=records.find(x=>x.id===id);if(r){r.status='Filed';r.filedDate=new Date().toISOString().slice(0,10);save()}};
+window.markPending=id=>{let r=records.find(x=>x.id===id);if(r){r.status='Pending';r.filedDate='';save()}};
+window.delRec=id=>{if(confirm('Delete this record?')){records=records.filter(x=>x.id!==id);save()}};
+['search','filterStatus','filterType'].forEach(id=>document.getElementById(id).addEventListener(id==='search'?'input':'change',render));
+function csvCell(s){s=String(s??'');return '"'+s.replace(/"/g,'""')+'"'}
+document.getElementById('exportBtn').onclick=()=>{let cols=['client','gstin','returnType','period','dueDate','status','filedDate','note'];let csv=[cols.join(','),...records.map(r=>cols.map(k=>csvCell(r[k])).join(','))].join('\r\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='gst_returns_backup.csv';a.click();URL.revokeObjectURL(a.href)};
+document.getElementById('importFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let txt=(await f.text()).replace(/^\ufeff/,'');let lines=txt.split(/\r?\n/).filter(x=>x.trim());let parse=line=>{let out=[],v='',inside=false;for(let i=0;i<line.length;i++){let c=line[i];if(c==='"'&&inside&&line[i+1]==='"'){v+='"';i++}else if(c==='"')inside=!inside;else if(c===','&&!inside){out.push(v);v=''}else v+=c}out.push(v);return out};let headers=parse(lines.shift()).map(x=>x.trim());let imported=lines.map(line=>{let a=parse(line),o={};headers.forEach((h,i)=>o[h]=a[i]||'');return o}).filter(o=>o.client&&o.dueDate).map(o=>({id:crypto.randomUUID(),client:o.client,gstin:o.gstin||'',returnType:o.returnType||'GSTR-1',period:o.period||'',dueDate:o.dueDate,status:o.status==='Filed'?'Filed':'Pending',filedDate:o.filedDate||'',note:o.note||''}));if(imported.length){records=records.concat(imported);save();alert(imported.length+' records imported.')}else alert('CSV must include client and dueDate columns.')}catch(err){alert('Could not read CSV. Use the template created by CSV Export.')}e.target.value=''};
+document.getElementById('notifyBtn').onclick=async()=>{if(!('Notification'in window)){alert('Notifications are not available in this browser.');return}let p=await Notification.requestPermission();alert('Enable Notifications: '+p)};
+function checkAlerts(){if(!('Notification'in window)||Notification.permission!=='granted')return;let now=new Date();let key='gst_alerts_'+now.toISOString().slice(0,10);if(sessionStorage.getItem(key))return;let due=records.filter(r=>r.status!=='Filed'&&daysLeft(r.dueDate)<=1);if(due.length)new Notification('GST Return Reminder',{body:due.length+' रिटर्न Today/Tomorrow देय हैं या overdue हैं। ऐप खोलकर सूची देखें।'});sessionStorage.setItem(key,'1')}
+render();checkAlerts();if('serviceWorker'in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script></body></html>
