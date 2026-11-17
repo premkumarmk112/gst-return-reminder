@@ -1,0 +1,33 @@
+name: Scanner 2 - SMA19 Filtered
+
+on:
+  schedule:
+    - cron: "50 3-9 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if market is closed (1 = yes)"
+        default: "0"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scanner.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_RUN: ${{ github.event.inputs.force || '0' }}
+          SCAN_MODE: cross
+          SCANNER_NAME: "Scanner 2"
+          MAX_STOCKS: "80"
+          MAX_PE: "30"
+          MIN_PROMOTER: "50"
+          NEED_SALES_GROWTH: "1"
