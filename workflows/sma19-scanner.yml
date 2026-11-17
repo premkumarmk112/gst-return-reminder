@@ -1,0 +1,29 @@
+name: SMA19 Scanner
+
+on:
+  schedule:
+    # हर घंटे, सोम-शुक्र, 09:15 से 15:15 IST (UTC 03:45 से 09:45)
+    - cron: "45 3-9 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Market बंद हो तब भी चलाएँ (1 = हाँ)"
+        default: "0"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scanner.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_RUN: ${{ github.event.inputs.force || '0' }}
+          SCAN_MODE: cross   # सभी "above" स्टॉक चाहिए तो इसे above कर दें
