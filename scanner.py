@@ -26,8 +26,16 @@ from bs4 import BeautifulSoup
 IST = timezone(timedelta(hours=5, minutes=30))
 SMA_DAYS = 19
 SCAN_MODE = os.getenv("SCAN_MODE", "cross").lower()      # cross | above
-MAX_STOCKS = int(os.getenv("MAX_STOCKS", "40"))           # cap per run (screener rate limit)
+MAX_STOCKS = int(os.getenv("MAX_STOCKS", "40"))           # max candidates checked on screener per run
+SCANNER_NAME = os.getenv("SCANNER_NAME", "")              # label shown in the Telegram header
 FORCE = os.getenv("FORCE_RUN", "0") == "1"                # ignore market-hours check
+
+# ---- fundamental filters: all OFF by default. Set env vars to turn them on.
+# (when a filter is on, a stock with missing data is rejected)
+MAX_PE = float(os.getenv("MAX_PE", "0"))                  # >0: P/E must be below this
+MIN_PROMOTER = float(os.getenv("MIN_PROMOTER", "0"))      # >0: promoter holding % must be above this
+NEED_SALES_GROWTH = os.getenv("NEED_SALES_GROWTH", "0") == "1"  # 1: QoQ and YoY sales both > 0
+FILTERS_ON = MAX_PE > 0 or MIN_PROMOTER > 0 or NEED_SALES_GROWTH
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -85,6 +93,17 @@ def fmt(v, suffix="", nd=1):
     return "N/A" if v is None else f"{v:,.{nd}f}{suffix}"
 
 
+def mark(v):
+    """Green up / red down indicator."""
+    if v is None:
+        return "⚪"
+    return "🟢▲" if v > 0 else ("🔴▼" if v < 0 else "⚪")
+
+
+def sgn(v, nd=1):
+    return "N/A" if v is None else f"{v:+.{nd}f}%"
+
+
 def pct_change(new, old):
     if new is None or old in (None, 0):
         return None
@@ -121,6 +140,7 @@ def find_matches(symbols: list[str]) -> list[dict]:
                     "price": price,
                     "sma": sma_now,
                     "above_pct": (price / sma_now - 1) * 100,
+                    "day_pct": (price / prev_close - 1) * 100,
                 })
     matches.sort(key=lambda m: m["above_pct"], reverse=True)
     return matches
@@ -231,17 +251,31 @@ def screener_data(m: dict, sess: requests.Session):
         print("industry PE failed", sym, e)
 
 
+def passes_filters(m: dict) -> bool:
+    if MAX_PE > 0 and (m.get("pe") is None or not (0 < m["pe"] < MAX_PE)):
+        return False
+    if MIN_PROMOTER > 0 and (m.get("promoter") is None or m["promoter"] <= MIN_PROMOTER):
+        return False
+    if NEED_SALES_GROWTH:
+        if m.get("qoq") is None or m["qoq"] <= 0:
+            return False
+        if m.get("yoy") is None or m["yoy"] <= 0:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------- telegram
 def card(m: dict) -> str:
     sym = html.escape(m["symbol"])
     scr = f"https://www.screener.in/company/{m['symbol']}/consolidated/"
     tv = f"https://in.tradingview.com/chart/?symbol=NSE:{m['symbol']}"
     return (
-        f"<b>{sym}</b>  ₹{m['price']:,.2f}  (19 SMA {m['sma']:,.2f}, +{m['above_pct']:.1f}% above)\n"
+        f"<b>{sym}</b>  ₹{m['price']:,.2f}  {mark(m['day_pct'])} {sgn(m['day_pct'], 2)} today\n"
+        f"19 SMA {m['sma']:,.2f} (+{m['above_pct']:.1f}% above)\n"
         f"P/E {fmt(m['pe'])} | Industry P/E {fmt(m['ind_pe'])}\n"
         f"FII {fmt(m['fii'], '%')} | Promoter {fmt(m['promoter'], '%')}\n"
-        f"Sales QoQ {fmt(m['qoq'], '%')} | Sales YoY {fmt(m['yoy'], '%')}\n"
-        f"Return 1M {fmt(m['ret1m'], '%')} | 3M {fmt(m['ret3m'], '%')}\n"
+        f"Sales QoQ {mark(m['qoq'])} {sgn(m['qoq'])} | YoY {mark(m['yoy'])} {sgn(m['yoy'])}\n"
+        f"Return 1M {mark(m['ret1m'])} {sgn(m['ret1m'])} | 3M {mark(m['ret3m'])} {sgn(m['ret3m'])}\n"
         f"52W High {fmt(m['hi52'], nd=2)} | 52W Low {fmt(m['lo52'], nd=2)}\n"
         f"All-time High {fmt(m['ath'], nd=2)}\n"
         f'<a href="{scr}">Screener</a> | <a href="{tv}">TradingView</a>'
@@ -282,20 +316,37 @@ def main():
     matches = find_matches(symbols)
     now = datetime.now(IST).strftime("%d-%b %H:%M")
     label = "crossed above" if SCAN_MODE == "cross" else "trading above"
-    print(f"{len(matches)} matches")
+    print(f"{len(matches)} matches (before fundamental filters)")
+    parts = []
+    if MAX_PE > 0:
+        parts.append(f"P/E < {MAX_PE:g}")
+    if MIN_PROMOTER > 0:
+        parts.append(f"Promoter > {MIN_PROMOTER:g}%")
+    if NEED_SALES_GROWTH:
+        parts.append("Sales QoQ & YoY up")
+    rules = ", ".join(parts) if parts else "no filters"
+    tag = f"[{SCANNER_NAME}] " if SCANNER_NAME else ""
     if not matches:
-        tg_send(f"📊 {now} IST\nNo stocks {label} 19-day SMA right now.")
+        tg_send(f"📊 {tag}{now} IST\nNo stocks {label} 19-day SMA right now.")
         return
-    shown = matches[:MAX_STOCKS]
+    candidates = matches[:MAX_STOCKS]
     sess = requests.Session()
     sess.headers.update(UA)
-    for m in shown:
-        price_stats(m)
+    passed = []
+    for m in candidates:
         screener_data(m, sess)
+        if passes_filters(m):
+            price_stats(m)
+            passed.append(m)
         time.sleep(1.5)
-    header = (f"📈 <b>{now} IST</b> - {len(matches)} stocks {label} 19-day SMA"
-              + (f" (top {len(shown)} shown)" if len(matches) > len(shown) else ""))
-    send_all(header, [card(m) for m in shown])
+    if not passed:
+        tg_send(f"📊 {tag}{now} IST\n{len(matches)} stocks {label} 19-day SMA, "
+                f"but none match your filters ({rules}).")
+        return
+    header = (f"📈 <b>{html.escape(tag)}{now} IST</b> - {len(passed)} stocks {label} 19-day SMA "
+              f"({rules})"
+              + (f" - top {len(candidates)} checked" if len(matches) > len(candidates) else ""))
+    send_all(header, [card(m) for m in passed])
 
 
 if __name__ == "__main__":
