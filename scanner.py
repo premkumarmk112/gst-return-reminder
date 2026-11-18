@@ -294,6 +294,15 @@ def tg_send(text: str):
     )
     if not r.ok:
         print("Telegram error:", r.text)
+        # fallback: resend as plain text so a formatting problem never hides the alert
+        plain = re.sub(r"<[^>]+>", "", text)
+        r2 = requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT, "text": html.unescape(plain),
+                  "disable_web_page_preview": True},
+            timeout=30,
+        )
+        print("Telegram fallback:", r2.status_code)
 
 
 def send_all(header: str, cards: list[str]):
@@ -319,13 +328,14 @@ def main():
     print(f"{len(matches)} matches (before fundamental filters)")
     parts = []
     if MAX_PE > 0:
-        parts.append(f"P/E < {MAX_PE:g}")
+        parts.append(f"P/E below {MAX_PE:g}")
     if MIN_PROMOTER > 0:
-        parts.append(f"Promoter > {MIN_PROMOTER:g}%")
+        parts.append(f"Promoter above {MIN_PROMOTER:g}%")
     if NEED_SALES_GROWTH:
-        parts.append("Sales QoQ & YoY up")
+        parts.append("Sales QoQ and YoY up")
     rules = ", ".join(parts) if parts else "no filters"
-    tag = f"[{SCANNER_NAME}] " if SCANNER_NAME else ""
+    rules = html.escape(rules)
+    tag = html.escape(f"[{SCANNER_NAME}] " if SCANNER_NAME else "")
     if not matches:
         tg_send(f"📊 {tag}{now} IST\nNo stocks {label} 19-day SMA right now.")
         return
@@ -343,7 +353,7 @@ def main():
         tg_send(f"📊 {tag}{now} IST\n{len(matches)} stocks {label} 19-day SMA, "
                 f"but none match your filters ({rules}).")
         return
-    header = (f"📈 <b>{html.escape(tag)}{now} IST</b> - {len(passed)} stocks {label} 19-day SMA "
+    header = (f"📈 <b>{tag}{now} IST</b> - {len(passed)} stocks {label} 19-day SMA "
               f"({rules})"
               + (f" - top {len(candidates)} checked" if len(matches) > len(candidates) else ""))
     send_all(header, [card(m) for m in passed])
