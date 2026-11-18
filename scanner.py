@@ -25,6 +25,8 @@ from bs4 import BeautifulSoup
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SMA_DAYS = 19
+SMA2_DAYS = int(os.getenv("SMA2_DAYS", "0"))              # >0: price must ALSO be above this SMA (e.g. 21)
+SMA_LABEL = f"{SMA_DAYS}-day" + (f" and {SMA2_DAYS}-day" if SMA2_DAYS else "")
 SCAN_MODE = os.getenv("SCAN_MODE", "cross").lower()      # cross | above
 MAX_STOCKS = int(os.getenv("MAX_STOCKS", "40"))           # max candidates checked on screener per run
 SCANNER_NAME = os.getenv("SCANNER_NAME", "")              # label shown in the Telegram header
@@ -35,7 +37,8 @@ FORCE = os.getenv("FORCE_RUN", "0") == "1"                # ignore market-hours 
 MAX_PE = float(os.getenv("MAX_PE", "0"))                  # >0: P/E must be below this
 MIN_PROMOTER = float(os.getenv("MIN_PROMOTER", "0"))      # >0: promoter holding % must be above this
 NEED_SALES_GROWTH = os.getenv("NEED_SALES_GROWTH", "0") == "1"  # 1: QoQ and YoY sales both > 0
-FILTERS_ON = MAX_PE > 0 or MIN_PROMOTER > 0 or NEED_SALES_GROWTH
+NEED_EPS_GROWTH = os.getenv("NEED_EPS_GROWTH", "0") == "1"      # 1: EPS up vs last quarter AND vs year-ago quarter
+FILTERS_ON = MAX_PE > 0 or MIN_PROMOTER > 0 or NEED_SALES_GROWTH or NEED_EPS_GROWTH
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -123,7 +126,7 @@ def find_matches(symbols: list[str]) -> list[dict]:
                 df = data[tk].dropna(subset=["Close"])
             except Exception:  # noqa: BLE001
                 continue
-            if len(df) < SMA_DAYS + 2:
+            if len(df) < max(SMA_DAYS, SMA2_DAYS) + 2:
                 continue
             # last row must be today's session (skip holidays / stale data)
             if df.index[-1].date() != datetime.now(IST).date() and not FORCE:
@@ -133,12 +136,22 @@ def find_matches(symbols: list[str]) -> list[dict]:
             price, sma_now = float(close.iloc[-1]), float(sma.iloc[-1])
             prev_close, sma_prev = float(close.iloc[-2]), float(sma.iloc[-2])
             above = price > sma_now
-            crossed = above and prev_close <= sma_prev
+            was_above = prev_close > sma_prev
+            sma2_now = None
+            if SMA2_DAYS:
+                sma2 = close.rolling(SMA2_DAYS).mean()
+                if sma2.iloc[-2:].isna().any():
+                    continue
+                sma2_now, sma2_prev = float(sma2.iloc[-1]), float(sma2.iloc[-2])
+                above = above and price > sma2_now
+                was_above = was_above and prev_close > sma2_prev
+            crossed = above and not was_above
             if (SCAN_MODE == "cross" and crossed) or (SCAN_MODE == "above" and above):
                 matches.append({
                     "symbol": tk.replace(".NS", ""),
                     "price": price,
                     "sma": sma_now,
+                    "sma2": sma2_now,
                     "above_pct": (price / sma_now - 1) * 100,
                     "day_pct": (price / prev_close - 1) * 100,
                 })
@@ -183,7 +196,8 @@ def table_rows(section):
 
 def screener_data(m: dict, sess: requests.Session):
     sym = m["symbol"]
-    m.update(pe=None, ind_pe=None, fii=None, promoter=None, qoq=None, yoy=None)
+    m.update(pe=None, ind_pe=None, fii=None, promoter=None, qoq=None, yoy=None,
+             eps_cur=None, eps_prev=None, eps_yago=None)
     soup = None
     for path in ("consolidated/", ""):
         try:
@@ -223,6 +237,16 @@ def screener_data(m: dict, sess: requests.Session):
         if len(sales) >= 5:
             m["yoy"] = pct_change(sales[-1], sales[-5])
 
+    # EPS: latest quarter, previous quarter, same quarter last year
+    eps = next((v for k, v in q.items() if k.startswith("EPS")), None)
+    if eps:
+        if len(eps) >= 1:
+            m["eps_cur"] = eps[-1]
+        if len(eps) >= 2:
+            m["eps_prev"] = eps[-2]
+        if len(eps) >= 5:
+            m["eps_yago"] = eps[-5]
+
     # industry P/E = median P/E of peers
     try:
         ph = soup.select_one("[data-url*='/peers/']")
@@ -261,20 +285,33 @@ def passes_filters(m: dict) -> bool:
             return False
         if m.get("yoy") is None or m["yoy"] <= 0:
             return False
+    if NEED_EPS_GROWTH:
+        c, p, y = m.get("eps_cur"), m.get("eps_prev"), m.get("eps_yago")
+        if c is None or p is None or y is None or c <= p or c <= y:
+            return False
     return True
 
 
 # ---------------------------------------------------------------- telegram
+def eps_line(m: dict) -> str:
+    c, p, y = m.get("eps_cur"), m.get("eps_prev"), m.get("eps_yago")
+    up = lambda a, b: mark(a - b) if a is not None and b is not None else "⚪"  # noqa: E731
+    return (f"EPS: this Q {fmt(c, nd=2)} | last Q {fmt(p, nd=2)} {up(c, p)}"
+            f" | year-ago Q {fmt(y, nd=2)} {up(c, y)}")
+
+
 def card(m: dict) -> str:
     sym = html.escape(m["symbol"])
     scr = f"https://www.screener.in/company/{m['symbol']}/consolidated/"
     tv = f"https://in.tradingview.com/chart/?symbol=NSE:{m['symbol']}"
     return (
         f"<b>{sym}</b>  ₹{m['price']:,.2f}  {mark(m['day_pct'])} {sgn(m['day_pct'], 2)} today\n"
-        f"19 SMA {m['sma']:,.2f} (+{m['above_pct']:.1f}% above)\n"
+        f"{SMA_DAYS} SMA {m['sma']:,.2f} (+{m['above_pct']:.1f}% above)"
+        + (f" | {SMA2_DAYS} SMA {m['sma2']:,.2f}" if m.get("sma2") else "") + "\n"
         f"P/E {fmt(m['pe'])} | Industry P/E {fmt(m['ind_pe'])}\n"
         f"FII {fmt(m['fii'], '%')} | Promoter {fmt(m['promoter'], '%')}\n"
         f"Sales QoQ {mark(m['qoq'])} {sgn(m['qoq'])} | YoY {mark(m['yoy'])} {sgn(m['yoy'])}\n"
+        f"{eps_line(m)}\n"
         f"Return 1M {mark(m['ret1m'])} {sgn(m['ret1m'])} | 3M {mark(m['ret3m'])} {sgn(m['ret3m'])}\n"
         f"52W High {fmt(m['hi52'], nd=2)} | 52W Low {fmt(m['lo52'], nd=2)}\n"
         f"All-time High {fmt(m['ath'], nd=2)}\n"
@@ -333,11 +370,13 @@ def main():
         parts.append(f"Promoter above {MIN_PROMOTER:g}%")
     if NEED_SALES_GROWTH:
         parts.append("Sales QoQ and YoY up")
+    if NEED_EPS_GROWTH:
+        parts.append("EPS up vs last Q and year-ago Q")
     rules = ", ".join(parts) if parts else "no filters"
     rules = html.escape(rules)
     tag = html.escape(f"[{SCANNER_NAME}] " if SCANNER_NAME else "")
     if not matches:
-        tg_send(f"📊 {tag}{now} IST\nNo stocks {label} 19-day SMA right now.")
+        tg_send(f"📊 {tag}{now} IST\nNo stocks {label} {SMA_LABEL} SMA right now.")
         return
     candidates = matches[:MAX_STOCKS]
     sess = requests.Session()
@@ -350,10 +389,10 @@ def main():
             passed.append(m)
         time.sleep(1.5)
     if not passed:
-        tg_send(f"📊 {tag}{now} IST\n{len(matches)} stocks {label} 19-day SMA, "
+        tg_send(f"📊 {tag}{now} IST\n{len(matches)} stocks {label} {SMA_LABEL} SMA, "
                 f"but none match your filters ({rules}).")
         return
-    header = (f"📈 <b>{tag}{now} IST</b> - {len(passed)} stocks {label} 19-day SMA "
+    header = (f"📈 <b>{tag}{now} IST</b> - {len(passed)} stocks {label} {SMA_LABEL} SMA "
               f"({rules})"
               + (f" - top {len(candidates)} checked" if len(matches) > len(candidates) else ""))
     send_all(header, [card(m) for m in passed])
