@@ -351,7 +351,7 @@ def main():
                             else -1), reverse=True)
 
     if not res:
-        send(f"Volume 2x scanner ({now:%d-%b %H:%M} IST): 0 stocks with volume ≥ "
+        send(f"Volume 3x scanner ({now:%d-%b %H:%M} IST): 0 stocks with volume ≥ "
              f"{VOL_MULT:g}x of 1-week average (checked {live} stocks).")
         return
 
