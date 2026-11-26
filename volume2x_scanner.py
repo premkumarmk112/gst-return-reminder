@@ -332,7 +332,7 @@ def build(rank, d):
 def main():
     symbols = load_symbols()
     if not symbols:
-        send("Volume 2x scanner: could not download the Nifty 500 list.")
+        send("Volume 3x scanner: could not download the Nifty 500 list.")
         sys.exit("ERROR: no symbols")
     now = datetime.now(IST)
     hist = download(symbols)
