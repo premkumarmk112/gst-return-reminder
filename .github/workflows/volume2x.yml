@@ -1,0 +1,22 @@
+name: Volume 2x Scanner
+
+on:
+  schedule:
+    # Mon-Fri at 10:00, 11:00, 12:00, 14:00, 15:00 IST
+    - cron: "30 4,5,6,8,9 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install yfinance pandas requests beautifulsoup4 lxml
+      - run: python volume2x_scanner.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
